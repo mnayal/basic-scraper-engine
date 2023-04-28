@@ -1,9 +1,9 @@
 (ns scraper-engine.core
   (:require [clj-http.client :as http]
-            [cheshire.core :as cheshire]
-            [clojure.walk :as walk]
             [clojure.data.csv :as csv]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io])
+  (:import (java.text SimpleDateFormat)
+           (java.util Date)))
 
 (def shopee-api-url "https://shopee.sg/api/v4/recommend/recommend")
 (def default-number-of-pages 3)
@@ -16,6 +16,7 @@
 
 (defn request-params [category-id offset]
   {:accept :json
+   :as :json
    :query-params {"bundle" "category_landing_page"
                   "catid" category-id
                   "limit" default-items-in-one-page
@@ -25,14 +26,14 @@
   (= (:status response) 200))
 
 (defn scrap-items [response-body]
-  (let [section (first (get-in response-body ["data" "sections"]))
-        items (get-in section ["data" "item"])]
+  (let [section (first (get-in response-body [:data :sections]))
+        items (get-in section [:data :item])]
     items))
 
 (defn get-response [url request-params]
   (let [http-response (http/get url request-params)
         body (when (successful? http-response)
-               (cheshire/decode (:body http-response)))]
+               (:body http-response))]
     (scrap-items body)))
 
 (defn format-price [item]
@@ -43,14 +44,13 @@
                           (format "%.2f")))))
 
 (defn parse-items [items page-number]
-  (let [items-keywordized (walk/keywordize-keys items)]
-    (map-indexed (fn [index item]
-                   (->
-                     (select-keys item [:itemid :name :price])
-                     (merge {:order-in-page index
-                             :page-number   page-number})
-                     (format-price)))
-                 items-keywordized)))
+  (map-indexed (fn [index item]
+                 (->
+                   (select-keys item [:itemid :name :price])
+                   (merge {:order-in-page index
+                           :page-number   page-number})
+                   (format-price)))
+               items))
 
 (defn write-to-csv [file rows append]
   (with-open [writer (io/writer file :append append)]
@@ -78,10 +78,15 @@
            [page items]))
        (range number-of-pages)))
 
+(defn csv-name-with-current-date-time [category-name]
+  (let [current-date-time (.format (SimpleDateFormat. "dd-MMM-yyyy-HH:mm:ss") (new Date))]
+    (format "generated/%s-At-%s.csv" category-name current-date-time)))
+
 (defn scrap-data-for-category [category-url]
   (let [[category-name category-id] (category-name-and-id category-url)
-        data-from-first-three-pages (fetch-data category-id default-number-of-pages)]
-    (create-csv (format "generated/%s.csv" category-name) data-from-first-three-pages)))
+        data-from-first-three-pages (fetch-data category-id default-number-of-pages)
+        csv-file-name (csv-name-with-current-date-time category-name)]
+    (create-csv csv-file-name data-from-first-three-pages)))
 
 (defn -main []
   (with-open [reader (io/reader "resources/categoryUrls.txt")]
