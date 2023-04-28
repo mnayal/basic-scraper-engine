@@ -35,13 +35,21 @@
                (cheshire/decode (:body http-response)))]
     (scrap-items body)))
 
+(defn format-price [item]
+  (update item :price (fn [price]
+                        (->>
+                          (/ price 100000)
+                          (float)
+                          (format "%.2f")))))
+
 (defn parse-items [items page-number]
   (let [items-keywordized (walk/keywordize-keys items)]
     (map-indexed (fn [index item]
-                   (merge
+                   (->
                      (select-keys item [:itemid :name :price])
-                     {:order-in-page index
-                      :page-number page-number}))
+                     (merge {:order-in-page index
+                             :page-number   page-number})
+                     (format-price)))
                  items-keywordized)))
 
 (defn write-to-csv [file rows append]
